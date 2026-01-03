@@ -102,7 +102,7 @@ jobs:
 
           echo "Calling SEREA..."
           http_code="$(curl -sS -o result.json -w "%{http_code}" \
-            -X POST "https://serea-recette.grinder.ovh/saas/v1/decision/simulate" \
+            -X POST "https://serea-recette.grinder.ovh/saas/decision/simulate" \
             -H "Authorization: Bearer ${SEREA_ACCESS_TOKEN}" \
             -H "Content-Type: application/json" \
             --data @payload.json
