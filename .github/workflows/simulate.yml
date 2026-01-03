@@ -25,20 +25,42 @@ on:
           - recette
           - prod
       repository:
-        description: "repo slug"
+        description: "repo slug (owner/name)"
         required: true
-        default: "${{ github.repository }}"
+        default: ""
       branch:
         description: "branch/ref"
         required: true
-        default: "${{ github.ref_name }}"
+        default: ""
 
 jobs:
   simulate:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+
     steps:
+      - name: Resolve defaults for optional inputs
+        id: defaults
+        run: |
+          set -euo pipefail
+
+          repo_input='${{ inputs.repository }}'
+          branch_input='${{ inputs.branch }}'
+
+          if [ -z "$repo_input" ]; then
+            repo_input='${{ github.repository }}'
+          fi
+
+          if [ -z "$branch_input" ]; then
+            branch_input='${{ github.ref_name }}'
+          fi
+
+          {
+            echo "repository=$repo_input"
+            echo "branch=$branch_input"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Validate inputs (fail fast)
         run: |
           set -euo pipefail
@@ -56,8 +78,8 @@ jobs:
             "action": "${{ inputs.action }}",
             "context": {
               "environment": "${{ inputs.environment }}",
-              "repository": "${{ inputs.repository }}",
-              "branch": "${{ inputs.branch }}",
+              "repository": "${{ steps.defaults.outputs.repository }}",
+              "branch": "${{ steps.defaults.outputs.branch }}",
               "run_id": "${{ github.run_id }}",
               "actor": "${{ github.actor }}"
             }
