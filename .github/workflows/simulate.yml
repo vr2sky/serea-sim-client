@@ -26,11 +26,11 @@ on:
           - prod
       repository:
         description: "repo slug (owner/name)"
-        required: true
+        required: false
         default: ""
       branch:
         description: "branch/ref"
-        required: true
+        required: false
         default: ""
 
 jobs:
