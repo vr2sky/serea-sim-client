@@ -1,0 +1,97 @@
+name: Simulate SEREA decision
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "provider: github|gitlab"
+        required: true
+        default: "github"
+      action:
+        description: "action: deploy|release|job|..."
+        required: true
+        default: "deploy"
+      environment:
+        description: "env: dev|recette|prod"
+        required: true
+        default: "recette"
+      repository:
+        description: "repo slug"
+        required: true
+        default: "${{ github.repository }}"
+      branch:
+        description: "branch/ref"
+        required: true
+        default: "${{ github.ref_name }}"
+
+jobs:
+  simulate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Validate inputs (fail fast)
+        run: |
+          set -euo pipefail
+          case "${{ inputs.provider }}" in
+            github|gitlab) ;;
+            *) echo "Invalid provider: ${{ inputs.provider }} (allowed: github|gitlab)"; exit 2 ;;
+          esac
+
+      - name: Build payload
+        run: |
+          set -euo pipefail
+          cat > payload.json <<'JSON'
+          {
+            "provider": "${{ inputs.provider }}",
+            "action": "${{ inputs.action }}",
+            "context": {
+              "environment": "${{ inputs.environment }}",
+              "repository": "${{ inputs.repository }}",
+              "branch": "${{ inputs.branch }}",
+              "run_id": "${{ github.run_id }}",
+              "actor": "${{ github.actor }}"
+            }
+          }
+          JSON
+
+          echo "Payload (client request):"
+          cat payload.json
+
+      - name: Call SEREA simulate endpoint
+        env:
+          SEREA_ACCESS_TOKEN: ${{ secrets.SEREA_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SEREA_ACCESS_TOKEN:-}" ]; then
+            echo "Missing secret: SEREA_ACCESS_TOKEN"
+            exit 3
+          fi
+
+          echo "Calling SEREA..."
+          http_code="$(curl -sS -o result.json -w "%{http_code}" \
+            -X POST "https://serea-recette.grinder.ovh/saas/v1/decision/simulate" \
+            -H "Authorization: Bearer ${SEREA_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data @payload.json
+          )"
+
+          echo "HTTP ${http_code}"
+          echo "Result:"
+          cat result.json
+
+          # Fail the job on non-2xx, while still keeping the body in result.json
+          case "${http_code}" in
+            2??) ;;
+            *) echo "Non-success HTTP status: ${http_code}"; exit 4 ;;
+          esac
+
+      - name: Upload artifacts (payload + result)
+        uses: actions/upload-artifact@v4
+        with:
+          name: serea-simulate
+          path: |
+            payload.json
+            result.json```
+::contentReference[oaicite:0]{index=0}
