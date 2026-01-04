@@ -11,10 +11,6 @@ on:
         options:
           - github
           - gitlab
-      action:
-        description: "action: deploy|release|job|..."
-        required: true
-        default: "deploy"
       environment:
         description: "env: dev|recette|prod"
         required: true
@@ -25,11 +21,11 @@ on:
           - recette
           - prod
       repository:
-        description: "repo slug (owner/name)"
+        description: "repo slug (owner/name) — default: current repo"
         required: false
         default: ""
       branch:
-        description: "branch/ref"
+        description: "branch/ref — default: current ref"
         required: false
         default: ""
 
@@ -71,8 +67,7 @@ jobs:
             *) echo "Invalid provider: ${{ inputs.provider }} (allowed: github|gitlab)"; exit 2 ;;
           esac
 
-      - name: Build payload (canonical flat DTO)
-        id: payload
+      - name: Build payload (GovernanceRequestV5DTO)
         shell: bash
         run: |
           set -euo pipefail
@@ -82,9 +77,7 @@ jobs:
           repository='${{ steps.defaults.outputs.repository }}'
           branch='${{ steps.defaults.outputs.branch }}'
 
-          # Convention client (doit être acceptée côté API si le champ existe)
           provider_instance="${provider}-${environment}"
-
           external_id="${{ github.run_id }}"
           workflow="${{ github.workflow }}"
           event_name="workflow_dispatch"
@@ -107,7 +100,7 @@ jobs:
               event_name: $event_name
             }' > payload.json
 
-          echo "Payload (client request):"
+          echo "Payload:"
           cat payload.json | jq .
 
       - name: Call SEREA simulate endpoint
@@ -124,7 +117,6 @@ jobs:
 
           URL="https://api.aquila.grinder.ovh/v5/governance/simulate"
 
-          echo "Calling SEREA..."
           http_code="$(curl -sS -o result.json -w "%{http_code}" \
             -X POST "$URL" \
             -H "Content-Type: application/json" \
@@ -133,14 +125,11 @@ jobs:
           )"
 
           echo "HTTP ${http_code}"
-          echo "Result (pretty):"
+          echo "Result:"
           cat result.json | jq . || cat result.json
 
           case "${http_code}" in
             200|201|202|204) ;;
-            422)
-              echo "DTO validation error (expected until payload is fully aligned)."
-              ;;
             *)
               echo "Non-success HTTP status: ${http_code}"
               exit 4
