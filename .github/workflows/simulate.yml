@@ -42,6 +42,7 @@ jobs:
     steps:
       - name: Resolve defaults for optional inputs
         id: defaults
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -62,6 +63,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Validate inputs (fail fast)
+        shell: bash
         run: |
           set -euo pipefail
           case "${{ inputs.provider }}" in
@@ -69,29 +71,53 @@ jobs:
             *) echo "Invalid provider: ${{ inputs.provider }} (allowed: github|gitlab)"; exit 2 ;;
           esac
 
-      - name: Build payload
+      - name: Build payload (canonical flat DTO)
+        id: payload
+        shell: bash
         run: |
           set -euo pipefail
-          cat > payload.json <<'JSON'
-          {
-            "provider": "${{ inputs.provider }}",
-            "action": "${{ inputs.action }}",
-            "context": {
-              "environment": "${{ inputs.environment }}",
-              "repository": "${{ steps.defaults.outputs.repository }}",
-              "branch": "${{ steps.defaults.outputs.branch }}",
-              "run_id": "${{ github.run_id }}",
-              "actor": "${{ github.actor }}"
-            }
-          }
-          JSON
+
+          provider='${{ inputs.provider }}'
+          action='${{ inputs.action }}'
+          environment='${{ inputs.environment }}'
+          repository='${{ steps.defaults.outputs.repository }}'
+          branch='${{ steps.defaults.outputs.branch }}'
+
+          # Convention (à garder identique côté API) :
+          provider_instance="${provider}-${environment}"
+          external_id="${{ github.run_id }}"
+          workflow="${{ github.workflow }}"
+          event_name="workflow_dispatch"
+
+          jq -n \
+            --arg provider "$provider" \
+            --arg provider_instance "$provider_instance" \
+            --arg external_id "$external_id" \
+            --arg repository "$repository" \
+            --arg branch "$branch" \
+            --arg workflow "$workflow" \
+            --arg event_name "$event_name" \
+            --arg action "$action" \
+            --arg environment "$environment" \
+            '{
+              provider: $provider,
+              provider_instance: $provider_instance,
+              external_id: $external_id,
+              repository: $repository,
+              branch: $branch,
+              workflow: $workflow,
+              event_name: $event_name,
+              action: $action,
+              environment: $environment
+            }' > payload.json
 
           echo "Payload (client request):"
-          cat payload.json
+          cat payload.json | jq .
 
       - name: Call SEREA simulate endpoint
         env:
           SEREA_ACCESS_TOKEN: ${{ secrets.SEREA_ACCESS_TOKEN }}
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -100,12 +126,14 @@ jobs:
             exit 3
           fi
 
+          URL="https://api.aquila.grinder.ovh/v5/governance/simulate"
+
           echo "Calling SEREA..."
           http_code="$(curl -sS -o result.json -w "%{http_code}" \
-            -X POST "https://serea-recette.grinder.ovh/saas/decision/simulate" \
-            -H "Authorization: Bearer ${SEREA_ACCESS_TOKEN}" \
+            -X POST "$URL" \
             -H "Content-Type: application/json" \
-            --data @payload.json
+            -H "Authorization: Bearer ${SEREA_ACCESS_TOKEN}" \
+            --data-binary @payload.json
           )"
 
           echo "HTTP ${http_code}"
@@ -113,7 +141,7 @@ jobs:
           cat result.json
 
           case "${http_code}" in
-            2??) ;;
+            200|201|202|204|422) ;;
             *) echo "Non-success HTTP status: ${http_code}"; exit 4 ;;
           esac
 
