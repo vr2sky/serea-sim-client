@@ -67,10 +67,26 @@ jobs:
             *) echo "Invalid provider: ${{ inputs.provider }} (allowed: github|gitlab)"; exit 2 ;;
           esac
 
-      - name: Build payload (GovernanceRequestV5DTO)
+      - name: Build payload + call simulate + gate
+        env:
+          SEREA_ACCESS_TOKEN: ${{ secrets.SEREA_ACCESS_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
+
+          : "${GITHUB_WORKSPACE:?GITHUB_WORKSPACE is required (must run inside GitHub Actions runner)}"
+          cd "$GITHUB_WORKSPACE"
+
+          outdir="$GITHUB_WORKSPACE/out"
+          mkdir -p "$outdir"
+
+          payload="$outdir/payload.json"
+          result="$outdir/result.json"
+
+          if [ -z "${SEREA_ACCESS_TOKEN:-}" ]; then
+            echo "Missing secret: SEREA_ACCESS_TOKEN"
+            exit 3
+          fi
 
           provider='${{ inputs.provider }}'
           environment='${{ inputs.environment }}'
@@ -78,9 +94,9 @@ jobs:
           branch='${{ steps.defaults.outputs.branch }}'
 
           provider_instance="${provider}-${environment}"
-          external_id="${{ github.run_id }}"
-          workflow="${{ github.workflow }}"
-          event_name="workflow_dispatch"
+          external_id='${{ github.run_id }}'
+          workflow='${{ github.workflow }}'
+          event_name='${{ github.event_name }}'
 
           jq -n \
             --arg provider "$provider" \
@@ -98,48 +114,53 @@ jobs:
               branch: $branch,
               workflow: $workflow,
               event_name: $event_name
-            }' > payload.json
+            }' > "$payload"
 
           echo "Payload:"
-          cat payload.json | jq .
-
-      - name: Call SEREA simulate endpoint
-        env:
-          SEREA_ACCESS_TOKEN: ${{ secrets.SEREA_ACCESS_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [ -z "${SEREA_ACCESS_TOKEN:-}" ]; then
-            echo "Missing secret: SEREA_ACCESS_TOKEN"
-            exit 3
-          fi
+          jq . "$payload"
 
           URL="https://api.aquila.grinder.ovh/v5/governance/simulate"
 
-          http_code="$(curl -sS -o result.json -w "%{http_code}" \
+          http_code="$(curl -sS -o "$result" -w "%{http_code}" \
             -X POST "$URL" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer ${SEREA_ACCESS_TOKEN}" \
-            --data-binary @payload.json
+            --data-binary @"$payload"
           )"
 
           echo "HTTP ${http_code}"
           echo "Result:"
-          cat result.json | jq . || cat result.json
+          jq . "$result" || cat "$result"
 
           case "${http_code}" in
             200|201|202|204) ;;
-            *)
-              echo "Non-success HTTP status: ${http_code}"
-              exit 4
-              ;;
+            *) echo "Non-success HTTP status: ${http_code}"; exit 4 ;;
           esac
+
+          decision="$(jq -r '.decision // empty' "$result")"
+          reason="$(jq -r '.final_reason_code // empty' "$result")"
+          decision_id="$(jq -r '.decision_id // empty' "$result")"
+          inputs_digest="$(jq -r '.inputs_digest // empty' "$result")"
+
+          echo "decision=${decision}"
+          echo "final_reason_code=${reason}"
+          echo "decision_id=${decision_id}"
+          echo "inputs_digest=${inputs_digest}"
+
+          if [ "${decision}" = "DENY" ]; then
+            echo "Governance gate: DENY (${reason})"
+            exit 10
+          fi
+
+          if [ "${decision}" != "ALLOW" ]; then
+            echo "Governance gate: invalid decision value '${decision}'"
+            exit 11
+          fi
 
       - name: Upload artifacts (payload + result)
         uses: actions/upload-artifact@v4
         with:
           name: serea-simulate
           path: |
-            payload.json
-            result.json
+            out/payload.json
+            out/result.json
