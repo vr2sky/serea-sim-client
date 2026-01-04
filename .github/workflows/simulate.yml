@@ -78,12 +78,13 @@ jobs:
           set -euo pipefail
 
           provider='${{ inputs.provider }}'
-          action='${{ inputs.action }}'
           environment='${{ inputs.environment }}'
           repository='${{ steps.defaults.outputs.repository }}'
           branch='${{ steps.defaults.outputs.branch }}'
 
+          # Convention client (doit être acceptée côté API si le champ existe)
           provider_instance="${provider}-${environment}"
+
           external_id="${{ github.run_id }}"
           workflow="${{ github.workflow }}"
           event_name="workflow_dispatch"
@@ -96,8 +97,6 @@ jobs:
             --arg branch "$branch" \
             --arg workflow "$workflow" \
             --arg event_name "$event_name" \
-            --arg action "$action" \
-            --arg environment "$environment" \
             '{
               provider: $provider,
               provider_instance: $provider_instance,
@@ -105,9 +104,7 @@ jobs:
               repository: $repository,
               branch: $branch,
               workflow: $workflow,
-              event_name: $event_name,
-              action: $action,
-              environment: $environment
+              event_name: $event_name
             }' > payload.json
 
           echo "Payload (client request):"
