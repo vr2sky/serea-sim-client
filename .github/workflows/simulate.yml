@@ -83,7 +83,6 @@ jobs:
           repository='${{ steps.defaults.outputs.repository }}'
           branch='${{ steps.defaults.outputs.branch }}'
 
-          # Convention (à garder identique côté API) :
           provider_instance="${provider}-${environment}"
           external_id="${{ github.run_id }}"
           workflow="${{ github.workflow }}"
@@ -137,12 +136,18 @@ jobs:
           )"
 
           echo "HTTP ${http_code}"
-          echo "Result:"
-          cat result.json
+          echo "Result (pretty):"
+          cat result.json | jq . || cat result.json
 
           case "${http_code}" in
-            200|201|202|204|422) ;;
-            *) echo "Non-success HTTP status: ${http_code}"; exit 4 ;;
+            200|201|202|204) ;;
+            422)
+              echo "DTO validation error (expected until payload is fully aligned)."
+              ;;
+            *)
+              echo "Non-success HTTP status: ${http_code}"
+              exit 4
+              ;;
           esac
 
       - name: Upload artifacts (payload + result)
